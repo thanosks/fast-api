@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/folders", tags=["folders"])
 
 id_counter = 1
+
 folders_dict: dict[int, FolderResponse] = {}
 
 
