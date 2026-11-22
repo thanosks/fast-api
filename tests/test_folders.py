@@ -271,3 +271,47 @@ def test_patch_folder_with_invalid_path_returns_422(client, sandbox, invalid_pat
     docs_get_folder_response = client.get(f"/folders/{folder_id}")
 
     assert docs_get_folder_response.json()["path"] == data["path"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("name", id="null_name"),
+        pytest.param("path", id="null_pah"),
+        pytest.param("writable", id="null_writable"),
+    ],
+)
+def test_patch_folder_with_null_field_returns_422(client, sandbox, field: str):
+    response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={field: None})
+
+    get_folder_response = client.get(f"/folders/{folder_id}")
+
+    assert patch_response.status_code == 422
+    assert get_folder_response.json() == data
+
+
+def test_patch_folder_with_null_description_clears_it(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos, "A note")
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={"description": None})
+
+    get_folder_response = client.get(f"/folders/{folder_id}")
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["description"] is None
+    assert get_folder_response.json()["description"] is None
+
+
+def test_patch_unknown_folder_returns_404(client, sandbox):
+    patch_response = client.patch(f"/folders/999", json={"name": "New"})
+
+    assert patch_response.status_code == 404
+    assert patch_response.json() == {"detail": "Folder not found"}
