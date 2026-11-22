@@ -7,6 +7,15 @@ from pathlib import Path
 from collections.abc import Callable
 
 
+INVALID_PATHS = [
+    pytest.param(lambda s: s.a_file, id="a_file"),
+    pytest.param(lambda s: s.tmp, id="tmp"),
+    pytest.param(lambda s: s.root_evil, id="root_evil"),
+    pytest.param(lambda s: s.allowed_root / "..", id="parent_traversal"),
+    pytest.param(lambda s: s.allowed_root / "nope", id="nonexistent_child"),
+]
+
+
 def assert_folder_response(body):
     from app.schemas.folder import FolderResponse
     FolderResponse.model_validate(body)
@@ -48,16 +57,7 @@ def test_create_folder(client, sandbox):
     assert data == {**payload, "id": ANY}
 
 
-@pytest.mark.parametrize(
-    "make_path",
-    [
-        pytest.param(lambda s: s.a_file, id="a_file"),
-        pytest.param(lambda s: s.tmp, id="tmp"),
-        pytest.param(lambda s: s.root_evil, id="root_evil"),
-        pytest.param(lambda s: s.allowed_root / "..", id="parent_traversal"),
-        pytest.param(lambda s: s.allowed_root / "nope", id="nonexistent_child"),
-    ]
-)
+@pytest.mark.parametrize("make_path", INVALID_PATHS)
 def test_create_folder_with_invalid_path_returns_422(client, sandbox, make_path: Callable):
     payload = dict(name="New", path=str(make_path(sandbox)), description=None, writable=False)
     response = client.post("/folders", json=payload)
@@ -118,9 +118,9 @@ def test_get_folder_by_id_returns_folder(client, sandbox):
 
     response = client.post("/folders", json=payload)
     assert_folder_response(response.json())
-    response_id = response.json()['id']
+    folder_id = response.json()['id']
 
-    folder_response = client.get(f"/folders/{response_id}")
+    folder_response = client.get(f"/folders/{folder_id}")
     assert_folder_response(folder_response.json())
 
     assert folder_response.status_code == 200
@@ -134,7 +134,7 @@ def test_get_folder_by_id_returns_folder(client, sandbox):
         pytest.param("abc", 422, id="not_a_number"),
     ],
 )
-def test_get_folder_with_invalid_id_returns_error_status(client, folder_id: int | str, expected_status:  int | str):
+def test_get_folder_with_invalid_id_returns_error_status(client, folder_id: int | str, expected_status:  int):
     folder_response = client.get(f"/folders/{folder_id}")
 
     assert folder_response.status_code == expected_status
@@ -172,14 +172,102 @@ def test_create_folder_with_duplicate_path_in_different_case_returns_409(client,
     assert len(client.get("/folders").json()) == 1
 
 
-def test_folder_patch_writable(client, sandbox):
+@pytest.mark.parametrize(
+    "field, new_value",
+    [
+        pytest.param("writable", True, id="Writable"),
+        pytest.param("name", "Renamed_New", id="Rename"),
+        pytest.param("description", "A note", id="Description"),
+    ],
+)
+def test_patch_folder_updates_only_the_given_field(client, sandbox, field: str, new_value):
     response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
 
-    response_id = response.json()['id']
+    folder_id = data['id']
 
-    patch_response = client.patch(f"/folders/{response_id}", json=dict(writable=True))
+    patch_response = client.patch(f"/folders/{folder_id}", json={field: new_value})
+    patched_data = patch_response.json()
 
     assert patch_response.status_code == 200
 
-    assert_folder_response(patch_response.json())
+    assert_folder_response(patched_data)
 
+    assert patched_data[field] == new_value
+
+    for key in data:
+        if key == field:
+            continue
+
+        assert data[key] == patched_data[key]
+
+
+def test_patch_folder_change_is_persisted(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={"name": "Rename_New"})
+
+    get_response = client.get(f"/folders/{folder_id}")
+
+    assert_folder_response(get_response.json())
+    assert patch_response.json() == get_response.json()
+    assert get_response.json()["name"] == "Rename_New"
+
+
+def test_patch_folder_with_empty_body_changes_nothing(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={})
+
+    assert patch_response.status_code == 200
+    assert patch_response.json() == data
+
+
+def test_patch_folder_with_own_path_returns_200(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={"path": str(sandbox.photos)})
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["path"] == data["path"]
+
+
+def test_patch_folder_with_other_folders_path_returns_409(client, sandbox):
+    photos_response = register_folder(client, "Photos", sandbox.photos)
+    docs_response = register_folder(client, "Docs", sandbox.docs)
+
+    docs_data = docs_response.json()
+    docs_folder_id = docs_data['id']
+
+    patch_response = client.patch(f"/folders/{docs_folder_id}", json={"path": str(sandbox.photos)})
+
+    assert patch_response.status_code == 409
+
+    docs_get_folder_response = client.get(f"/folders/{docs_folder_id}")
+
+    assert docs_get_folder_response.json() == docs_data
+
+
+@pytest.mark.parametrize("invalid_path", INVALID_PATHS)
+def test_patch_folder_with_invalid_path_returns_422(client, sandbox, invalid_path: Callable):
+    response = register_folder(client, "New", sandbox.photos)
+    data = response.json()
+
+    folder_id = data['id']
+
+    patch_response = client.patch(f"/folders/{folder_id}", json={"path": str(invalid_path(sandbox))})
+
+    assert patch_response.status_code == 422
+
+    docs_get_folder_response = client.get(f"/folders/{folder_id}")
+
+    assert docs_get_folder_response.json()["path"] == data["path"]
