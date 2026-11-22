@@ -12,6 +12,16 @@ def assert_folder_response(body):
     FolderResponse.model_validate(body)
 
 
+def register_folder(client, name, path, description=None, writable=False):
+    payload = dict(name=name, path=str(path), description=description, writable=writable)
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 201
+    assert_folder_response(response.json())
+
+    return response
+
+
 def test_health(client):
     response = client.get("/health")
 
@@ -160,3 +170,16 @@ def test_create_folder_with_duplicate_path_in_different_case_returns_409(client,
 
     assert response.status_code == 409
     assert len(client.get("/folders").json()) == 1
+
+
+def test_folder_patch_writable(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos)
+
+    response_id = response.json()['id']
+
+    patch_response = client.patch(f"/folders/{response_id}", json=dict(writable=True))
+
+    assert patch_response.status_code == 200
+
+    assert_folder_response(patch_response.json())
+
