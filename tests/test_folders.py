@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import ANY
 import os
 import pytest
+import sys
 from pathlib import Path
 from collections.abc import Callable
 
@@ -101,3 +102,61 @@ def test_get_folders(client, sandbox):
     assert {d["name"] for d in data} == {"Photos", "Docs"}
     assert len(data) == 2
 
+
+def test_get_folder_by_id_returns_folder(client, sandbox):
+    payload = dict(name="New", path=str(sandbox.photos), description=None, writable=False)
+
+    response = client.post("/folders", json=payload)
+    assert_folder_response(response.json())
+    response_id = response.json()['id']
+
+    folder_response = client.get(f"/folders/{response_id}")
+    assert_folder_response(folder_response.json())
+
+    assert folder_response.status_code == 200
+    assert response.json() == folder_response.json()
+
+
+@pytest.mark.parametrize(
+    "folder_id, expected_status",
+    [
+        pytest.param(999, 404, id="unknown_id"),
+        pytest.param("abc", 422, id="not_a_number"),
+    ],
+)
+def test_get_folder_with_invalid_id_returns_error_status(client, folder_id: int | str, expected_status:  int | str):
+    folder_response = client.get(f"/folders/{folder_id}")
+
+    assert folder_response.status_code == expected_status
+
+
+def test_create_folder_with_duplicate_path_returns_409(client, sandbox):
+    payload = dict(name="New", path=str(sandbox.photos), description=None, writable=False)
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 201
+
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 409
+
+    payload = dict(name="New_1", path=str(sandbox.photos), description=None, writable=False)
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 409
+    assert len(client.get("/folders").json()) == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Path comparison is case-insensitive only on Windows")
+def test_create_folder_with_duplicate_path_in_different_case_returns_409(client, sandbox):
+    payload = dict(name="New", path=str(sandbox.photos), description=None, writable=False)
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 201
+
+    cap_path = str(sandbox.photos.parent / sandbox.photos.name.upper())
+    payload = dict(name="New", path=cap_path, description=None, writable=False)
+    response = client.post("/folders", json=payload)
+
+    assert response.status_code == 409
+    assert len(client.get("/folders").json()) == 1
