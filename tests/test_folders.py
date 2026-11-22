@@ -315,3 +315,35 @@ def test_patch_unknown_folder_returns_404(client, sandbox):
 
     assert patch_response.status_code == 404
     assert patch_response.json() == {"detail": "Folder not found"}
+
+
+def test_delete_folder_returns_204_and_removes_it(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos, "A note")
+    data = response.json()
+
+    folder_id = data['id']
+
+    delete_response = client.delete(f"/folders/{folder_id}")
+
+    assert delete_response.status_code == 204
+
+    get_folder_response = client.get(f"/folders/{folder_id}")
+
+    assert get_folder_response.status_code == 404
+
+
+def test_delete_folder_keeps_folder_on_disk(client, sandbox):
+    response = register_folder(client, "New", sandbox.photos, "A note")
+    data = response.json()
+
+    folder_id = data['id']
+
+    client.delete(f"/folders/{folder_id}")
+
+    assert sandbox.photos.exists()
+
+
+def test_delete_unknown_folder_returns_404(client, sandbox):
+    delete_response = client.delete(f"/folders/999")
+
+    assert delete_response.status_code == 404
