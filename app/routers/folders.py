@@ -50,7 +50,7 @@ def get_folder_id(folder_id: int):
     return get_folder_or_404(folder_id)
 
 
-@router.patch("/{folder_id}", response_model=list[FolderResponse])
+@router.patch("/{folder_id}", response_model=FolderResponse)
 def patch_folder_id(folder_id: int, folder_update: FolderUpdate):
     existing_folder = get_folder_or_404(folder_id)
 
@@ -68,7 +68,7 @@ def patch_folder_id(folder_id: int, folder_update: FolderUpdate):
     changes = folder_update.model_dump(exclude_unset=True)
     folders_dict[folder_id] = existing_folder.model_copy(update=changes)
 
-    return list(folders_dict.values())
+    return folders_dict[folder_id]
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
